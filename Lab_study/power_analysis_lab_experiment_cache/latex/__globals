@@ -1,0 +1,12 @@
+settings	^	==	as.integer	c	names	rep	seq_len	sum
+helpers	::	!	[[	[<-	&&	<	<=	>	$	abline	alpha	approx	as.data.frame	as.list	binomial	c	cbind	data.frame	do.call	drop	glmer	glmerControl	grepl	idx	if	legend	length	Map	matplot	matrix	max	mean	mvrnorm	N	n_mc	n_pairs	names	nrow	pair	paste0	plogis	pt	quantile	r_values	rbinom	Reduce	rep	replicate	rnorm	rowMeans	sapply	sd	sd_pair	sd_participant	seq_len	setNames	sqrt	sum	t	unname	var
+setup	::	$	library
+sim-message-ols	~	$	data.frame	decide	grid_d	harm	lm	make_y	N	n_sims	outcomes	plot_outcomes	run_grid	sesoi_d	set.seed	show	summary
+sim-message-glmm	~	$	data.frame	decide	factor	fit_glmm	grid_lo	harm	idx	make_choices	n_sims_glmm	outcomes	p_plant	pair	plot_outcomes	purity	qlogis	run_grid	sesoi_lo	set.seed	show	summary
+sim-moderation-ols	~	$	c	cbind	coef	contrast	data.frame	decide	grid_d	harm	lm	main_msg_d	main_val_d	make_values	make_y	N	n_sims	nrow	outcomes	plot_outcomes	purity	rbind	run_grid	seq_along	sesoi_d	set.seed	show	vcov
+sim-moderation-r	<<-	$	c	cbind	data.frame	do.call	lapply	n_sims	rbind	run_grid	sesoi_d	set.seed	show	sim_moderation_ols
+sim-moderation-glmm	~	$	as.matrix	contrast	data.frame	decide	factor	fit_glmm	fixef	grid_lo	harm	idx	main_msg_lo	main_val_lo	make_choices	make_values	n_sims_glmm	outcomes	p_plant	pair	purity	qlogis	run_grid	sesoi_lo	set.seed	show	vcov	w_L
+sim-parallel	~	$	c	cbind	decide_mc	expand.grid	lm	make_y	matrix	mvrnorm	N	n_sims_med	other_path	outcomes	purity	r_mediators	run_grid	sesoi_ab	set.seed	show	summary	z
+sim-serial	^	~	$	c	data.frame	decide_mc	grid_d	lm	make_y	matrix	N	n_pairs	n_sims_med	outer	p_plant	path_m1_m2	path_m2_y	plogis	purity	qlogis	rbinom	rnorm	rowMeans	run_grid	sd_pair	sd_participant	sesoi_d	set.seed	show	summary	z
+sim-crossover	!=	~	$	c	cond	data.frame	decide	grid_d	harm	lm	matrix	mvrnorm	n_sims	outcomes	plot_outcomes	r_emotions	run_grid	sesoi_d	set.seed	show	sum	summary	z
+design-table-values	[[	&	<	==	$	abs	data.frame	grid_d	grid_lo	if	mde80	names	pur_only	rbind	sesoi_ab	sesoi_d	sesoi_lo	show	sym	tab_h10	tab_h12	tab_h13	tab_h16	tab_h19	tab_h9	tab_mglmm	tab_msg	tab_par	which

@@ -1,0 +1,446 @@
+---
+title: "Moral framing of animal-based consumption: a priori sensitivity (power) simulation"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+header-includes:
+  - \usepackage{booktabs}
+  - \usepackage{float}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      cache = TRUE, autodep = TRUE, fig.pos = "H",
+                      fig.width = 6.5, fig.height = 3.8)
+knitr::dep_auto()
+library(lme4)
+library(MASS)
+```
+
+# Purpose
+
+The sample size is fixed at $N = 500$ (167 control, 167 harm message, 166 purity message).
+This document is an *a priori* sensitivity analysis for the hypotheses in the Design table
+(Table 1). For each type of test it estimates the probability that the test ends as
+**supported**, **not supported** or **inconclusive** across a range of true effect sizes, with
+the smallest effect size of interest (SESOI) as the reference point. The values marked
+"[from Rmd]" in the Design table are collected in Section 10.
+
+* SESOI: $d = 0.20$ for continuous outcomes; 0.36 on the log-odds scale for plant-based choice;
+  0.20 SD of the outcome per SD of the moral value for each interaction.
+* All continuous variables are standardized before analysis, so effects are in SD units.
+* Every directional hypothesis is evaluated with two one-sided tests at $\alpha = .05$, with no
+  correction for multiple testing:
+    * **Supported**: the effect is greater than zero (one-sided $p < .05$; for indirect effects, the
+      lower bound of the 90% CI is above zero).
+    * **Not supported**: the effect is smaller than the SESOI (one-sided inferiority test,
+      $p < .05$; for indirect effects, the upper bound of the 90% CI is below the SESOI).
+    * **Inconclusive**: neither.
+* H16 is tested in the positive direction only.
+
+Hypotheses that use the same type of test are simulated once:
+
+| Section | Simulated test | Hypotheses |
+|---|---|---|
+| 3 | Message effect, OLS | H1--H6, H17, H18 |
+| 4 | Message effect, mixed logistic regression | H7, H8 |
+| 5 | Moderation model for moralization: compound matching contrast $L$, single interaction, $b_8 - b_6$ | H9, H10, H11, H12 |
+| 6 | Compound matching contrast, mixed logistic regression | H13 |
+| 7 | Indirect effect in parallel mediation | H14, H15 |
+| 8 | Serial indirect effect | H16 |
+| 9 | Emotion crossover interaction | H19 |
+
+Hypotheses that share a test have the same sampling distribution (e.g., $b_6$ and $b_8$, or the
+two indirect effects of the parallel mediation model), so one simulation gives the power for all.
+
+# Settings and helper functions
+
+All assumptions are set here and can be changed before knitting.
+
+```{r settings}
+# Design
+n_group  <- c(control = 167, harm = 167, purity = 166)   # N = 500
+N        <- sum(n_group)
+n_pairs  <- 12                                           # product-choice trials
+
+# Inference
+alpha    <- .05           # one-sided
+sesoi_d  <- 0.20          # SD units
+sesoi_lo <- 0.36          # log-odds (= 0.20 * pi / sqrt(3))
+sesoi_ab <- 0.20^2        # two-path indirect effect (H14, H15)
+
+# Effect-size grids
+grid_d  <- c(0, 0.10, 0.20, 0.30, 0.40)
+grid_lo <- c(0, 0.18, 0.36, 0.54, 0.72)
+
+# Number of simulated data sets per grid value
+n_sims      <- 2000       # OLS-based tests
+n_sims_med  <- 1000       # mediation (Monte Carlo CIs)
+n_sims_glmm <- 500        # mixed logistic models
+n_mc        <- 5000       # Monte Carlo draws per mediation CI
+
+# Plant-based choice model
+p_plant        <- .50     # P(plant-based choice) in the control condition
+sd_participant <- 1.5     # random-intercept SD, participants (log-odds)
+sd_pair        <- 0.5     # random-intercept SD, product pairs (log-odds)
+
+# Correlations
+r_values    <- .40        # care/harm values with purity values
+r_mediators <- .40        # perceived harm with perceived impurity (residual)
+r_emotions  <- .40        # compassion with disgust (within person)
+
+# Other true effects (held fixed)
+main_msg_d  <- 0.20; main_val_d  <- 0.30   # moderation models, SD units
+main_msg_lo <- 0.36; main_val_lo <- 0.36   # moderation models, log-odds
+other_path  <- 0.30                        # parallel mediation: the other mediator's paths
+path_m1_m2  <- 0.30                        # serial: perceived harm -> moralization
+path_m2_y   <- 0.54                        # serial: moralization -> choice (log-odds per SD)
+
+# Fixed design vectors
+cond   <- rep(names(n_group), n_group)
+harm   <- as.integer(cond == "harm")
+purity <- as.integer(cond == "purity")
+idx    <- rep(seq_len(N), each = n_pairs)           # long format for the choice data
+pair   <- rep(seq_len(n_pairs), times = N)
+```
+
+```{r helpers}
+z <- function(x) (x - mean(x)) / sd(x)
+
+# Adds noise so the outcome has (about) unit variance, then standardizes it.
+make_y <- function(lp) z(lp + rnorm(length(lp), 0, sqrt(1 - var(lp))))
+
+# Two one-sided tests: supported (est > 0) and not supported (est < sesoi).
+decide <- function(est, se, sesoi, df = Inf) {
+  est <- unname(est)
+  se  <- unname(se)
+  sup <- unname(pt(est / se, df, lower.tail = FALSE) < alpha)
+  inf <- unname(pt((est - sesoi) / se, df) < alpha)
+  c(supported = sup, not_supported = !sup && inf)
+}
+
+# Same rules for an indirect effect (product of paths), using a 90% Monte Carlo CI.
+decide_mc <- function(est, se, sesoi) {
+  draws <- Reduce(`*`, Map(function(m, s) rnorm(n_mc, m, s), est, se))
+  q <- unname(quantile(draws, c(.05, .95)))
+  c(supported = q[1] > 0, not_supported = q[1] <= 0 && q[2] < sesoi)
+}
+
+# Moral values: two correlated, standardized scores.
+make_values <- function(r = r_values) {
+  V <- mvrnorm(N, c(0, 0), matrix(c(1, r, r, 1), 2))
+  data.frame(care = z(V[, 1]), pur = z(V[, 2]))
+}
+
+# Simulated plant-based choices (long format) for a person-level linear predictor lp.
+make_choices <- function(lp) {
+  eta <- lp[idx] + rnorm(N, 0, sd_participant)[idx] + rnorm(n_pairs, 0, sd_pair)[pair]
+  rbinom(N * n_pairs, 1, plogis(eta))
+}
+
+fit_glmm <- function(formula, dat)
+  glmer(formula, data = dat, family = binomial, nAGQ = 0,
+        control = glmerControl(calc.derivs = FALSE))
+
+# Estimate and SE of a linear combination of coefficients (weights w, named).
+contrast <- function(b, S, w) {
+  wf <- setNames(rep(0, length(b)), names(b)); wf[names(w)] <- w
+  c(est = sum(wf * b), se = sqrt(drop(t(wf) %*% S %*% wf)))
+}
+
+# Runs sim_fun n times for each row of grid and averages the results.
+run_grid <- function(grid, sim_fun, n) {
+  grid <- as.data.frame(grid)
+  res <- t(sapply(seq_len(nrow(grid)), function(i)
+    rowMeans(replicate(n, do.call(sim_fun, as.list(grid[i, , drop = FALSE]))))))
+  cbind(grid, res)
+}
+
+# Outcome table for one test (prefix selects the test when a simulation returns several).
+outcomes <- function(res, prefix = "") {
+  sup <- res[[paste0(prefix, "supported")]]
+  ns  <- res[[paste0(prefix, "not_supported")]]
+  data.frame(res[, !grepl("supported", names(res)), drop = FALSE],
+             Supported = sup, `Not supported` = ns, Inconclusive = 1 - sup - ns,
+             check.names = FALSE)
+}
+
+# Effect size at which P(supported) reaches .80 (linear interpolation on the grid).
+mde80 <- function(x, p) if (max(p) < .80) NA else approx(p, x, xout = .80, ties = mean)$y
+
+show <- function(tab, caption) knitr::kable(tab, digits = 3, booktabs = TRUE,
+                                            caption = caption, row.names = FALSE)
+
+plot_outcomes <- function(tab, x, xlab, sesoi) {
+  matplot(x, tab[, c("Supported", "Not supported", "Inconclusive")], type = "b",
+          pch = 16, lty = 1, lwd = 2, col = c("darkgreen", "firebrick", "grey50"),
+          ylim = c(0, 1), xlab = xlab, ylab = "Probability")
+  abline(v = sesoi, lty = 3); abline(h = .80, lty = 3, col = "grey70")
+  legend("right", c("Supported", "Not supported", "Inconclusive"), lwd = 2, bty = "n",
+         col = c("darkgreen", "firebrick", "grey50"), cex = .8)
+}
+```
+
+# Message effects on continuous outcomes (H1--H6, H17, H18)
+
+Model: $y = b_0 + b_1\,\text{Harm} + b_2\,\text{Purity}$, with $y$ standardized (moralization,
+perceived harm to animals, perceived impurity, compassion or disgust). The true effect $d$ is
+placed on one message; the result is the same for $b_1$ and $b_2$.
+
+```{r sim-message-ols}
+set.seed(101)
+sim_message_ols <- function(d) {
+  y   <- make_y(d * harm)
+  est <- summary(lm(y ~ harm + purity))$coefficients["harm", ]
+  decide(est[1], est[2], sesoi_d, df = N - 3)
+}
+res_msg <- run_grid(data.frame(d = grid_d), sim_message_ols, n_sims)
+tab_msg <- outcomes(res_msg)
+show(tab_msg, "Message effect on a continuous outcome (H1--H6, H17, H18).")
+plot_outcomes(tab_msg, grid_d, "True message effect (d)", sesoi_d)
+```
+
+# Message effects on plant-based choice (H7, H8)
+
+Model: $\text{logit}(P) = b_0 + b_1\,\text{Harm} + b_2\,\text{Purity} + u_\text{participant} + u_\text{pair}$,
+fitted with `glmer` (`nAGQ = 0`) to the 12 choices of each participant.
+
+```{r sim-message-glmm}
+set.seed(102)
+sim_message_glmm <- function(b) {
+  dat <- data.frame(choice = make_choices(qlogis(p_plant) + b * harm),
+                    harm = harm[idx], purity = purity[idx],
+                    id = factor(idx), pair = factor(pair))
+  fit <- fit_glmm(choice ~ harm + purity + (1 | id) + (1 | pair), dat)
+  est <- summary(fit)$coefficients["harm", ]
+  decide(est[1], est[2], sesoi_lo)
+}
+res_mglmm <- run_grid(data.frame(b = grid_lo), sim_message_glmm, n_sims_glmm)
+tab_mglmm <- outcomes(res_mglmm)
+show(tab_mglmm, "Message effect on plant-based choice, log-odds (H7, H8).")
+plot_outcomes(tab_mglmm, grid_lo, "True message effect (log-odds)", sesoi_lo)
+```
+
+# Moderation by moral values, moralization (H9--H12)
+
+Model: moralization $= b_0 + b_1\text{Harm} + b_2\text{Purity} + b_3\text{CareV} + b_4\text{PurityV}
++ b_5\text{Harm}\times\text{CareV} + b_6\text{Purity}\times\text{CareV} + b_7\text{Harm}\times\text{PurityV}
++ b_8\text{Purity}\times\text{PurityV}$.
+
+Under MFT, each message works better among people who hold the matching value: $b_5 = b_8 = m$,
+and the mismatching interactions are zero ($b_6 = b_7 = 0$). The simulation varies $m$ and
+records three tests from the same model:
+
+* **H9**: compound matching contrast $L = (b_5 - b_7) - (b_6 - b_8)$; here $L = 2m$, SESOI 0.40.
+* **H10**: the matching interaction $b_8$ (SESOI 0.20). **H11** tests $b_6$, which has the same
+  sampling distribution, so the $b_8$ results apply to it.
+* **H12**: the contrast $b_8 - b_6$ (SESOI 0.20).
+
+The last grid row shows matching for the purity message only ($b_8 = 0.20$, $b_5 = 0$, so
+$L = 0.20$). In that row $b_8$ and $b_8 - b_6$ equal their SESOI, so it gives the power of H10
+and H12.
+
+```{r sim-moderation-ols}
+set.seed(103)
+w_L <- c("harm:care" = 1, "harm:pur" = -1, "purity:care" = -1, "purity:pur" = 1)
+sim_moderation_ols <- function(m_harm, m_purity) {
+  v   <- make_values()
+  y   <- make_y(main_msg_d * (harm + purity) + main_val_d * (v$care + v$pur) +
+                m_harm * harm * v$care + m_purity * purity * v$pur)
+  fit <- lm(y ~ (harm + purity) * (care + pur), data = cbind(y, harm, purity, v))
+  b <- coef(fit); S <- vcov(fit); df <- N - 9
+  L  <- contrast(b, S, w_L)
+  b8 <- contrast(b, S, c("purity:pur" = 1))
+  dc <- contrast(b, S, c("purity:pur" = 1, "purity:care" = -1))
+  c(H9  = decide(L[1],  L[2],  2 * sesoi_d, df),
+    H10 = decide(b8[1], b8[2], sesoi_d, df),
+    H12 = decide(dc[1], dc[2], sesoi_d, df))
+}
+grid_mod <- rbind(data.frame(m_harm = grid_d, m_purity = grid_d),
+                  data.frame(m_harm = 0, m_purity = sesoi_d))
+res_mod <- run_grid(grid_mod, sim_moderation_ols, n_sims)
+sym      <- seq_along(grid_d)          # rows with m_harm = m_purity
+pur_only <- nrow(grid_mod)             # purity-only row
+
+tab_h9  <- outcomes(res_mod, "H9.")
+tab_h10 <- outcomes(res_mod, "H10.")
+tab_h12 <- outcomes(res_mod, "H12.")
+show(tab_h9,  "Compound matching contrast, L = m_harm + m_purity (H9).")
+show(tab_h10, "Single matching interaction b8; also applies to b6 (H10, H11).")
+show(tab_h12, "Contrast b8 - b6 (H12).")
+plot_outcomes(tab_h9[sym, ], grid_d, "True matching interaction per message (m; L = 2m)", sesoi_d)
+```
+
+**Sensitivity to the correlation between care/harm and purity values.** The correlation is
+unknown, so H9 is repeated for $r = .20$, $.40$ and $.60$ at $m = 0$ and $m = 0.20$.
+
+```{r sim-moderation-r}
+set.seed(104)
+res_r <- do.call(rbind, lapply(c(.20, .40, .60), function(r) {
+  r_values <<- r
+  cbind(r = r, run_grid(data.frame(m_harm = c(0, sesoi_d), m_purity = c(0, sesoi_d)),
+                        sim_moderation_ols, n_sims))
+}))
+r_values <- .40
+show(data.frame(r = res_r$r, m = res_r$m_harm, Supported = res_r$H9.supported,
+                `Not supported` = res_r$H9.not_supported, check.names = FALSE),
+     "Compound matching contrast (H9) by the correlation between the moral values.")
+```
+
+# Compound matching contrast, plant-based choice (H13)
+
+Same fixed terms as in Section 5, in the mixed logistic model of Section 4. Each matching
+interaction is $m$ on the log-odds scale (SESOI 0.36), so $L = 2m$ (SESOI 0.72).
+
+```{r sim-moderation-glmm}
+set.seed(105)
+sim_moderation_glmm <- function(m) {
+  v   <- make_values()
+  lp  <- qlogis(p_plant) + main_msg_lo * (harm + purity) + main_val_lo * (v$care + v$pur) +
+         m * harm * v$care + m * purity * v$pur
+  dat <- data.frame(choice = make_choices(lp), harm = harm[idx], purity = purity[idx],
+                    care = v$care[idx], pur = v$pur[idx], id = factor(idx), pair = factor(pair))
+  fit <- fit_glmm(choice ~ (harm + purity) * (care + pur) + (1 | id) + (1 | pair), dat)
+  L   <- contrast(fixef(fit), as.matrix(vcov(fit)), w_L)
+  decide(L[1], L[2], 2 * sesoi_lo)
+}
+res_gmod <- run_grid(data.frame(m = grid_lo[1:4]), sim_moderation_glmm, n_sims_glmm)
+tab_h13  <- outcomes(res_gmod)
+show(tab_h13, "Compound matching contrast on plant-based choice, L = 2m in log-odds (H13).")
+```
+
+# Parallel mediation (H14, H15)
+
+X = message (both dummies), M1 = perceived harm, M2 = perceived impurity, Y = moralization.
+The simulated route is Purity $\to$ M2 $\to$ Y, with path $a$ (message $\to$ mediator) and
+path $b$ (mediator $\to$ moralization, controlling for the other mediator). The other mediator's
+paths are fixed at `r other_path`. H14 (impurity route) and H15 (harm route) have the same
+structure, so one simulation covers both. SESOI = 0.04 ($= 0.20^2$).
+
+```{r sim-parallel}
+set.seed(106)
+sim_parallel <- function(a, b) {
+  E  <- mvrnorm(N, c(0, 0), matrix(c(1, r_mediators, r_mediators, 1), 2))
+  M1 <- z(other_path * purity + E[, 1])
+  M2 <- z(a * purity + E[, 2])
+  Y  <- make_y(other_path * M1 + b * M2)
+  fa <- summary(lm(M2 ~ harm + purity))$coefficients["purity", ]
+  fb <- summary(lm(Y ~ harm + purity + M1 + M2))$coefficients["M2", ]
+  decide_mc(c(fa[1], fb[1]), c(fa[2], fb[2]), sesoi_ab)
+}
+res_par <- run_grid(expand.grid(b = c(0, 0.10, 0.20, 0.30), a = c(0.20, 0.30, 0.50)),
+                    sim_parallel, n_sims_med)
+tab_par <- outcomes(res_par)
+tab_par <- cbind(tab_par[, c("a", "b")], `a x b` = tab_par$a * tab_par$b, tab_par[, -(1:2)])
+show(tab_par, "Indirect effect in the parallel mediation model (H14, H15).")
+```
+
+# Serial mediation (H16)
+
+X = message, M1 = perceived harm, M2 = moralization, Y = proportion of plant-based choices (of 12,
+generated from the choice model of Section 4). Path $a$ (purity message $\to$ perceived harm)
+varies; perceived harm $\to$ moralization is fixed at `r path_m1_m2` SD and moralization $\to$
+choice at `r path_m2_y` log-odds per SD. H16 is tested in the positive direction only.
+
+```{r sim-serial}
+set.seed(107)
+sim_serial <- function(a) {
+  M1  <- make_y(a * purity)
+  M2  <- make_y(path_m1_m2 * M1)
+  eta <- qlogis(p_plant) + path_m2_y * M2 + rnorm(N, 0, sd_participant)
+  P   <- plogis(outer(eta, rnorm(n_pairs, 0, sd_pair), "+"))
+  Y   <- z(rowMeans(matrix(rbinom(N * n_pairs, 1, P), N)))
+  f1 <- summary(lm(M1 ~ harm + purity))$coefficients["purity", ]
+  f2 <- summary(lm(M2 ~ harm + purity + M1))$coefficients["M1", ]
+  f3 <- summary(lm(Y ~ harm + purity + M1 + M2))$coefficients["M2", ]
+  decide_mc(c(f1[1], f2[1], f3[1]), c(f1[2], f2[2], f3[2]), sesoi_d^3)
+}
+res_ser <- run_grid(data.frame(a = grid_d), sim_serial, n_sims_med)
+tab_h16 <- data.frame(a = res_ser$a, Supported = res_ser$supported,
+                      Inconclusive = 1 - res_ser$supported)
+show(tab_h16, "Serial indirect effect, positive direction only (H16).")
+```
+
+# Emotion crossover (H19)
+
+Model (harm and purity conditions only, $n = 333$, two ratings per person):
+rating $= b_0 + b_1\text{Harm} + b_2\text{Compassion} + b_3\text{Harm}\times\text{Compassion}
++ u_\text{participant}$. With two ratings per person and a random intercept, the estimate and the
+test of $b_3$ are the same as an OLS regression of the difference score (compassion $-$ disgust)
+on Harm, which is used here for speed.
+
+```{r sim-crossover}
+set.seed(108)
+keep <- cond != "control"
+h    <- harm[keep]
+sim_crossover <- function(b3) {
+  E    <- mvrnorm(sum(keep), c(0, 0), matrix(c(1, r_emotions, r_emotions, 1), 2))
+  comp <- z(b3 * h + E[, 1])
+  disg <- z(E[, 2])
+  est  <- summary(lm(I(comp - disg) ~ h))$coefficients["h", ]
+  decide(est[1], est[2], sesoi_d, df = sum(keep) - 2)
+}
+res_cross <- run_grid(data.frame(b3 = grid_d), sim_crossover, n_sims)
+tab_h19 <- outcomes(res_cross)
+show(tab_h19, "Emotion crossover interaction (H19).")
+plot_outcomes(tab_h19, grid_d, "True crossover interaction (SD)", sesoi_d)
+```
+
+# Values for the Design table
+
+These values replace "[from Rmd]" in the Design table. *Power* is P(supported) at the SESOI.
+*P(not supported given 0)* is the probability of concluding that the effect is smaller than the
+SESOI when the true effect is zero. *Effect for .80 power* is the true effect at which
+P(supported) reaches .80, interpolated on the grid (NA = not reached within the grid).
+
+```{r design-table-values}
+row <- function(hyps, sesoi, tab, x) {
+  at <- which(abs(x - sesoi) < 1e-9); nul <- which(x == 0)
+  ns <- if ("Not supported" %in% names(tab)) tab[["Not supported"]][nul] else NA
+  data.frame(Hypotheses = hyps, SESOI = sesoi, Power = tab$Supported[at],
+             `P(not supported given 0)` = ns,
+             `Effect for .80 power` = mde80(x, tab$Supported), check.names = FALSE)
+}
+fixed_row <- function(hyps, sesoi, power, ns)
+  data.frame(Hypotheses = hyps, SESOI = sesoi, Power = power,
+             `P(not supported given 0)` = ns, `Effect for .80 power` = NA,
+             check.names = FALSE)
+par_at  <- which(tab_par$a == 0.20 & tab_par$b == 0.20)
+par_nul <- which(tab_par$a == 0.20 & tab_par$b == 0)
+
+values <- rbind(
+  row("H1-H6, H17, H18", sesoi_d,      tab_msg,       grid_d),
+  row("H7, H8",          sesoi_lo,     tab_mglmm,     grid_lo),
+  row("H9 (scale of L)", 2 * sesoi_d,  tab_h9[sym, ], 2 * grid_d),
+  fixed_row("H9, matching for one message only (L = 0.20)", 0.20,
+            tab_h9$Supported[pur_only], NA),
+  fixed_row("H10, H11", sesoi_d, tab_h10$Supported[pur_only], tab_h10[["Not supported"]][1]),
+  fixed_row("H12",      sesoi_d, tab_h12$Supported[pur_only], tab_h12[["Not supported"]][1]),
+  row("H13 (scale of L)", 2 * sesoi_lo, tab_h13,      2 * grid_lo[1:4]),
+  fixed_row("H14, H15 (a = b = 0.20; null: a = 0.20, b = 0)", sesoi_ab,
+            tab_par$Supported[par_at], tab_par[["Not supported"]][par_nul]),
+  row("H16 (path a)",    sesoi_d,      tab_h16,       grid_d),
+  row("H19",             sesoi_d,      tab_h19,       grid_d))
+show(values, "Values for the Design table.")
+```
+
+# Assumptions
+
+* Normal residuals for continuous outcomes; outcomes generated with unit variance and standardized.
+* Plant-based choice: P(plant) = `r p_plant` in control; random-intercept SDs `r sd_participant`
+  (participants) and `r sd_pair` (product pairs) on the log-odds scale; 12 choices per participant.
+  Mixed models fitted with `nAGQ = 0`, a fast approximation to the default Laplace fit.
+* Moderation models: message main effects `r main_msg_d` SD (`r main_msg_lo` log-odds), value
+  main effects `r main_val_d` SD (`r main_val_lo` log-odds); correlation between the moral values
+  `r r_values`.
+* Mediation: 90% Monte Carlo CIs (`r n_mc` draws) in place of the percentile bootstrap; residual
+  correlation between the mediators `r r_mediators`; fixed paths as stated in Sections 7 and 8.
+* Emotions: within-person correlation between compassion and disgust `r r_emotions`.
+* Simulations per grid value: `r n_sims` (OLS), `r n_sims_med` (mediation), `r n_sims_glmm`
+  (mixed logistic). With 500 data sets the Monte Carlo SE of a probability is at most .022.
+
+```{r session-info, cache = FALSE}
+sessionInfo()
+```

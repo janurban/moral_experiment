@@ -1,0 +1,2 @@
+settings	^	==	as.integer	c	names	rep	seq_len	sum
+helpers	::	!	[[	[<-	&&	<	<=	>	$	abline	alpha	approx	as.data.frame	as.list	binomial	c	cbind	data.frame	do.call	drop	glmer	glmerControl	grepl	idx	if	legend	length	Map	matplot	matrix	max	mean	mvrnorm	N	n_mc	n_pairs	names	nrow	pair	paste0	plogis	pt	quantile	r_values	rbinom	Reduce	rep	replicate	rnorm	rowMeans	sapply	sd	sd_pair	sd_participant	seq_len	setNames	sqrt	sum	t	unname	var

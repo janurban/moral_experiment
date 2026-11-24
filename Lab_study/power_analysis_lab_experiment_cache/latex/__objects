@@ -1,0 +1,12 @@
+settings	alpha	cond	grid_d	grid_lo	harm	idx	main_msg_d	main_msg_lo	main_val_d	main_val_lo	N	n_group	n_mc	n_pairs	n_sims	n_sims_glmm	n_sims_med	other_path	p_plant	pair	path_m1_m2	path_m2_y	purity	r_emotions	r_mediators	r_values	sd_pair	sd_participant	sesoi_ab	sesoi_d	sesoi_lo
+helpers	contrast	decide	decide_mc	fit_glmm	make_choices	make_values	make_y	mde80	outcomes	plot_outcomes	run_grid	show	z
+setup	
+sim-message-ols	res_msg	sim_message_ols	tab_msg
+sim-message-glmm	res_mglmm	sim_message_glmm	tab_mglmm
+sim-moderation-ols	grid_mod	pur_only	res_mod	sim_moderation_ols	sym	tab_h10	tab_h12	tab_h9	w_L
+sim-moderation-r	r_values	res_r
+sim-moderation-glmm	res_gmod	sim_moderation_glmm	tab_h13
+sim-parallel	res_par	sim_parallel	tab_par
+sim-serial	res_ser	sim_serial	tab_h16
+sim-crossover	h	keep	res_cross	sim_crossover	tab_h19
+design-table-values	fixed_row	par_at	par_nul	row	values
