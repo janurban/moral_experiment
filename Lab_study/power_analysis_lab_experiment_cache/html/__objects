@@ -1,0 +1,2 @@
+settings	alpha	cond	grid_d	grid_lo	harm	idx	main_msg_d	main_msg_lo	main_val_d	main_val_lo	N	n_group	n_mc	n_pairs	n_sims	n_sims_glmm	n_sims_med	other_path	p_plant	pair	path_m1_m2	path_m2_y	purity	r_emotions	r_mediators	r_values	sd_pair	sd_participant	sesoi_ab	sesoi_d	sesoi_lo
+helpers	contrast	decide	decide_mc	fit_glmm	make_choices	make_values	make_y	mde80	outcomes	plot_outcomes	run_grid	show	z
